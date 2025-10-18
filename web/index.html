@@ -1,13 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Менеджер паролей</title>
-    
-    <script src="https://cdn.tailwindcss.com"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Менеджер паролей</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
+
+<body class="min-h-screen p-8">
   <div id="app" class="w-full max-w-md">
     <div id="setup-screen" class="hidden">
       <div class="bg-white p-6 rounded shadow">
@@ -31,25 +33,122 @@
       </div>
     </div>
 
-    <div id="main-screen" class="hidden text-center">
+    <div id="main-screen" class="hidden">
       <div class="bg-white p-6 rounded shadow">
-        <h2 class="text-xl font-bold text-gray-800 mb-2">Добро пожаловать!</h2>
-        <p class="text-gray-600 mb-4">Сессия активна.</p>
-        <button onclick="logout()" class="text-red-600 underline">Выйти</button>
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-xl font-bold text-gray-800">Мои записи</h2>
+          <button onclick="logout()" class="text-red-600 text-sm">Выйти</button>
+        </div>
+
+
+        <div class="mb-6 p-4 border rounded bg-gray-50">
+          <h3 class="font-medium mb-2">Добавить запись</h3>
+          <input id="new-title" placeholder="Название (например, GitHub)" class="w-full p-2 border rounded mb-2">
+          <input id="new-url" placeholder="Сайт (опционально)" class="w-full p-2 border rounded mb-2">
+          <input id="new-username" placeholder="Логин" class="w-full p-2 border rounded mb-2">
+          <input id="new-password" placeholder="Пароль" class="w-full p-2 border rounded mb-2">
+          <textarea id="new-notes" placeholder="Заметки (опционально)"
+            class="w-full p-2 border rounded mb-2"></textarea>
+          <button onclick="addEntry()" class="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700">
+            Сохранить
+          </button>
+          <p id="add-msg" class="mt-2 text-sm text-red-600"></p>
+        </div>
+
+
+        <div id="entries-list" class="space-y-3">
+
+        </div>
       </div>
     </div>
   </div>
 
   <script>
-    let sessionId = null;
+    let sessionId = localStorage.getItem('session_id');
+    const masterPassword = null; // будем запрашивать у пользователя при необходимости
 
     async function api(url, method, body) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (sessionId) headers['X-Session-ID'] = sessionId;
       const res = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: body ? JSON.stringify(body) : null
       });
       return await res.json();
+    }
+
+    async function getMasterPassword() {
+      // В реальном приложении — показываем модалку
+      // Здесь — просто prompt (только для демо!)
+      return prompt("Введите мастер-пароль для расшифровки:");
+    }
+
+    async function loadEntries() {
+      const pass = await getMasterPassword();
+      if (!pass) return;
+
+      const res = await api('/api/v1/entries/list', 'POST', { password: pass });
+      if (res.error) {
+        alert('Ошибка: ' + res.error);
+        return;
+      }
+
+      const list = document.getElementById('entries-list');
+      list.innerHTML = '';
+      if (res.entries.length === 0) {
+        list.innerHTML = '<p class="text-gray-500">Нет записей</p>';
+        return;
+      }
+
+      res.entries.forEach(e => {
+        const div = document.createElement('div');
+        div.className = 'p-3 border rounded bg-gray-50';
+        div.innerHTML = `
+        <div class="font-bold">${e.title}</div>
+        <div>Логин: ${e.username}</div>
+        <div>Пароль: <span class="font-mono">••••••••</span> 
+          <button onclick="showPassword('${e.password}')" class="text-blue-600 text-sm">Показать</button>
+        </div>
+        ${e.url ? `<div>Сайт: <a href="${e.url}" target="_blank" class="text-blue-600">${e.url}</a></div>` : ''}
+        ${e.notes ? `<div class="text-sm text-gray-600 mt-1">Заметки: ${e.notes}</div>` : ''}
+      `;
+        list.appendChild(div);
+      });
+    }
+
+    async function addEntry() {
+      const title = document.getElementById('new-title').value;
+      if (!title) { alert('Укажите название'); return; }
+
+      const pass = await getMasterPassword();
+      if (!pass) return;
+
+      const entry = {
+        title: title,
+        url: document.getElementById('new-url').value,
+        username: document.getElementById('new-username').value,
+        password: document.getElementById('new-password').value,
+        notes: document.getElementById('new-notes').value,
+      };
+
+      const res = await api('/api/v1/entries', 'POST', {
+        password: pass,
+        entry: entry
+      });
+
+      if (res.success) {
+        document.getElementById('add-msg').textContent = 'Сохранено!';
+        setTimeout(() => document.getElementById('add-msg').textContent = '', 2000);
+        document.getElementById('new-title').value = '';
+        document.getElementById('new-url').value = '';
+        document.getElementById('new-username').value = '';
+        document.getElementById('new-password').value = '';
+        document.getElementById('new-notes').value = '';
+        loadEntries(); // обновить список
+      } else {
+        document.getElementById('add-msg').textContent = res.error || 'Ошибка';
+      }
     }
 
     async function checkVaultStatus() {
@@ -62,7 +161,7 @@
 
         const hash = await hashRequest.text()
         if (hash.trim() === '') throw new Error('vault not init');
-        
+
         loginScreen.classList.remove('hidden');
       } catch (e) {
         setupScreen.classList.remove('hidden');
@@ -99,14 +198,25 @@
       }
     }
 
+    function showPassword(password) {
+      alert('Пароль: ' + password);
+    }
+
     function logout() {
       sessionId = null;
       localStorage.removeItem('session_id');
-      document.getElementById('main-screen').classList.add('hidden');
-      document.getElementById('login-screen').classList.remove('hidden');
+      window.location.reload();
     }
 
-    checkVaultStatus();
+    // При загрузке главного экрана — показываем записи
+    if (sessionId) {
+      document.getElementById('login-screen').classList.add('hidden');
+      document.getElementById('main-screen').classList.remove('hidden');
+      loadEntries();
+    } else {
+      checkVaultStatus();
+    }
   </script>
 </body>
+
 </html>

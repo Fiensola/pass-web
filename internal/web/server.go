@@ -3,10 +3,12 @@ package web
 import (
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/fiensola/pass-web/internal/auth"
 	"github.com/fiensola/pass-web/internal/config"
 	"github.com/fiensola/pass-web/internal/crypto"
+	"github.com/fiensola/pass-web/internal/entries"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -44,6 +46,8 @@ func StartServer() {
 	})
 	r.POST("/api/v1/setup", SetupHandler(cfg.VaultDir))
 	r.POST("/api/v1/login", LoginHandler(cfg.VaultDir))
+	r.POST("/api/v1/entries/list", AuthRequired(), entriesListHandler(cfg.VaultDir))
+	r.POST("/api/v1/entries", AuthRequired(), entriesCreateHandler(cfg.VaultDir))
 
 	port := ":" + cfg.Port
 	logger.Info("starting server", zap.String("port", port))
@@ -87,11 +91,11 @@ func SetupHandler(vaultDir string) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"success": "true"})
+		c.JSON(http.StatusOK, gin.H{"success": true})
 	}
 }
 
-func LoginHandler(vauldDir string) gin.HandlerFunc {
+func LoginHandler(vaultDir string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var request struct {
 			Password string `json:"password"`
@@ -101,25 +105,99 @@ func LoginHandler(vauldDir string) gin.HandlerFunc {
 			return
 		}
 
-		hash, err := auth.Load(vauldDir)
-		if err != nil || hash == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "vault not initialized"})
-			return
-		}
-
-		valid, err := crypto.VerifyPassword(request.Password, hash)
-		if err != nil || !valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid password"})
+		isPasswordError, status, message := checkPassword(request.Password, vaultDir)
+		if isPasswordError {
+			c.JSON(status, gin.H{"error": message})
 			return
 		}
 
 		sessionID := sessionManager.CreateSession()
 
 		c.JSON(http.StatusOK, gin.H{
-			"success": "true",
-			"sess_id": sessionID,
-			"expire":  int64(auth.SessionTTL.Seconds()),
+			"success":    true,
+			"session_id": sessionID,
+			"expire":     int64(auth.SessionTTL.Seconds()),
 		})
+	}
+}
+
+func entriesListHandler(vaultDir string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var request struct {
+			Password string `json:"password"`
+		}
+		if err := c.ShouldBindJSON(&request); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+
+		isPasswordError, status, message := checkPassword(request.Password, vaultDir)
+		if isPasswordError {
+			c.JSON(status, gin.H{"error": message})
+			return
+		}
+
+		entries, err := entries.Load(vaultDir, request.Password)
+		if err != nil {
+			logger.Error("failed to load entries", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load data"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"entries": entries})
+	}
+}
+
+func entriesCreateHandler(vaultDir string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var request struct {
+			Password string `json:"password"`
+			Entry    struct {
+				Title    string `json:"title"`
+				URL      string `json:"url"`
+				Username string `json:"username"`
+				Password string `json:"password"`
+				Notes    string `json:"notes"`
+			} `json:"entry"`
+		}
+		if err := c.ShouldBindJSON(&request); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid reqeust"})
+			return
+		}
+
+		isPasswordError, status, message := checkPassword(request.Password, vaultDir)
+		if isPasswordError {
+			c.JSON(status, gin.H{"error": message})
+			return
+		}
+
+		current, err := entries.Load(vaultDir, request.Password)
+		if err != nil {
+			logger.Error("failed to load entries", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load data"})
+			return
+		}
+
+		newEntry := entries.Entry{
+			ID:        entries.NewID(),
+			Title:     request.Entry.Title,
+			URL:       request.Entry.URL,
+			Username:  request.Entry.Username,
+			Password:  request.Entry.Password,
+			Notes:     request.Entry.Notes,
+			CreatedAt: time.Now(),
+		}
+
+		current = append(current, newEntry)
+
+		err = entries.Save(vaultDir, current, request.Password)
+		if err != nil {
+			logger.Error("failed to save entries", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save"})
+			return
+		}
+
+		c.JSON(http.StatusCreated, gin.H{"success": true, "id": newEntry.ID})
 	}
 }
 
@@ -140,4 +218,18 @@ func AuthRequired() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func checkPassword(password string, vaultDir string) (bool, int, string) {
+	hash, err := auth.Load(vaultDir)
+	if err != nil || hash == "" {
+		return true, http.StatusInternalServerError, "vault error"
+	}
+
+	valid, err := crypto.VerifyPassword(password, hash)
+	if err != nil || !valid {
+		return true, http.StatusUnauthorized, "invalid password"
+	}
+
+	return false, 0, ""
 }
