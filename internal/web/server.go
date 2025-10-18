@@ -33,7 +33,8 @@ func StartServer() {
 
 	r := gin.Default()
 
-	//r.Static("/static", "../web")
+	r.StaticFile("/vault/meta.json", "vault/meta.json")
+	r.Static("/static", "web")
 
 	r.GET("/", func(c *gin.Context) {
 		c.File("web/index.html")
@@ -119,5 +120,24 @@ func LoginHandler(vauldDir string) gin.HandlerFunc {
 			"sess_id": sessionID,
 			"expire":  int64(auth.SessionTTL.Seconds()),
 		})
+	}
+}
+
+func AuthRequired() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sessID := c.GetHeader("X-Session-ID")
+		if sessID == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "messing session id"})
+			c.Abort()
+			return
+		}
+
+		if !sessionManager.IsValid(sessID) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid session"})
+			c.Abort()
+			return
+		}
+
+		c.Next()
 	}
 }

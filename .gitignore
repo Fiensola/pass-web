@@ -33,3 +33,5 @@ config.yaml
 # Go
 go.sum
 coverage.out
+
+vault

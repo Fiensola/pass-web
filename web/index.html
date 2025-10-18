@@ -8,13 +8,105 @@
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body>
-    <div class="text-center p-6 bg-white rounded shadow-md max-w-md w-full">
-    <h1 class="text-2xl font-bold text-gray-800 mb-4">GoPass Web</h1>
-    <p class="text-gray-600 mb-6">Локальный менеджер паролей</p>
-    <div id="app">
-      <p class="text-green-600">Сервер работает!</p>
-      <p class="mt-2 text-sm text-gray-500">Скоро здесь будет форма входа...</p>
+  <div id="app" class="w-full max-w-md">
+    <div id="setup-screen" class="hidden">
+      <div class="bg-white p-6 rounded shadow">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">Установите мастер-пароль</h2>
+        <input id="setup-pass" type="password" placeholder="Мастер-пароль" class="w-full p-2 border rounded mb-3">
+        <button onclick="setupVault()" class="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700">
+          Установить
+        </button>
+        <p id="setup-msg" class="mt-2 text-sm text-red-600"></p>
+      </div>
+    </div>
+
+    <div id="login-screen" class="hidden">
+      <div class="bg-white p-6 rounded shadow">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">Вход</h2>
+        <input id="login-pass" type="password" placeholder="Мастер-пароль" class="w-full p-2 border rounded mb-3">
+        <button onclick="login()" class="w-full bg-green-600 text-white py-2 rounded hover:bg-green-700">
+          Войти
+        </button>
+        <p id="login-msg" class="mt-2 text-sm text-red-600"></p>
+      </div>
+    </div>
+
+    <div id="main-screen" class="hidden text-center">
+      <div class="bg-white p-6 rounded shadow">
+        <h2 class="text-xl font-bold text-gray-800 mb-2">Добро пожаловать!</h2>
+        <p class="text-gray-600 mb-4">Сессия активна.</p>
+        <button onclick="logout()" class="text-red-600 underline">Выйти</button>
+      </div>
     </div>
   </div>
+
+  <script>
+    let sessionId = null;
+
+    async function api(url, method, body) {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : null
+      });
+      return await res.json();
+    }
+
+    async function checkVaultStatus() {
+      const setupScreen = document.getElementById('setup-screen');
+      const loginScreen = document.getElementById('login-screen');
+
+      try {
+        const hashRequest = await fetch('/vault/meta.json');
+        if (hashRequest.status === 404) throw new Error('vault not init');
+
+        const hash = await hashRequest.text()
+        if (hash.trim() === '') throw new Error('vault not init');
+        
+        loginScreen.classList.remove('hidden');
+      } catch (e) {
+        setupScreen.classList.remove('hidden');
+      }
+    }
+
+    async function setupVault() {
+      const pass = document.getElementById('setup-pass').value;
+      const msg = document.getElementById('setup-msg');
+      if (!pass) return;
+      const res = await api('/api/v1/setup', 'POST', { password: pass });
+      if (res.success) {
+        document.getElementById('setup-screen').classList.add('hidden');
+        document.getElementById('login-screen').classList.remove('hidden');
+        msg.textContent = '';
+      } else {
+        msg.textContent = res.error || 'Ошибка';
+      }
+    }
+
+    async function login() {
+      const pass = document.getElementById('login-pass').value;
+      const msg = document.getElementById('login-msg');
+      if (!pass) return;
+      const res = await api('/api/v1/login', 'POST', { password: pass });
+      if (res.success) {
+        sessionId = res.session_id;
+        localStorage.setItem('session_id', sessionId);
+        document.getElementById('login-screen').classList.add('hidden');
+        document.getElementById('main-screen').classList.remove('hidden');
+        msg.textContent = '';
+      } else {
+        msg.textContent = res.error || 'Ошибка';
+      }
+    }
+
+    function logout() {
+      sessionId = null;
+      localStorage.removeItem('session_id');
+      document.getElementById('main-screen').classList.add('hidden');
+      document.getElementById('login-screen').classList.remove('hidden');
+    }
+
+    checkVaultStatus();
+  </script>
 </body>
 </html>
