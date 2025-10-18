@@ -1,0 +1,35 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Logs
+*.log
+logs
+*.bak
+
+# Build
+bin/
+pkg/
+target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Environment
+.env
+.env.local
+config.yaml
+
+# Go
+go.sum
+coverage.out
