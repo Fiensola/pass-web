@@ -72,8 +72,8 @@ func SetupHandler(vaultDir string) gin.HandlerFunc {
 			return
 		}
 
-		existingHash, _ := auth.Load(vaultDir)
-		if existingHash != "" {
+		existingMeta, _ := auth.Load(vaultDir)
+		if existingMeta.MasterHash != "" {
 			c.JSON(http.StatusConflict, gin.H{"error": "vault already initialized"})
 			return
 		}
@@ -105,7 +105,7 @@ func LoginHandler(vaultDir string) gin.HandlerFunc {
 			return
 		}
 
-		isPasswordError, status, message := checkPassword(request.Password, vaultDir)
+		isPasswordError, status, message, _ := checkPassword(request.Password, vaultDir)
 		if isPasswordError {
 			c.JSON(status, gin.H{"error": message})
 			return
@@ -131,13 +131,13 @@ func entriesListHandler(vaultDir string) gin.HandlerFunc {
 			return
 		}
 
-		isPasswordError, status, message := checkPassword(request.Password, vaultDir)
+		isPasswordError, status, message, meta := checkPassword(request.Password, vaultDir)
 		if isPasswordError {
 			c.JSON(status, gin.H{"error": message})
 			return
 		}
 
-		entries, err := entries.Load(vaultDir, request.Password)
+		entries, err := entries.Load(vaultDir, request.Password, meta.DataSalt)
 		if err != nil {
 			logger.Error("failed to load entries", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load data"})
@@ -165,13 +165,13 @@ func entriesCreateHandler(vaultDir string) gin.HandlerFunc {
 			return
 		}
 
-		isPasswordError, status, message := checkPassword(request.Password, vaultDir)
+		isPasswordError, status, message, meta := checkPassword(request.Password, vaultDir)
 		if isPasswordError {
 			c.JSON(status, gin.H{"error": message})
 			return
 		}
 
-		current, err := entries.Load(vaultDir, request.Password)
+		current, err := entries.Load(vaultDir, request.Password, meta.DataSalt)
 		if err != nil {
 			logger.Error("failed to load entries", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load data"})
@@ -190,7 +190,7 @@ func entriesCreateHandler(vaultDir string) gin.HandlerFunc {
 
 		current = append(current, newEntry)
 
-		err = entries.Save(vaultDir, current, request.Password)
+		err = entries.Save(vaultDir, current, request.Password, meta.DataSalt)
 		if err != nil {
 			logger.Error("failed to save entries", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save"})
@@ -220,16 +220,16 @@ func AuthRequired() gin.HandlerFunc {
 	}
 }
 
-func checkPassword(password string, vaultDir string) (bool, int, string) {
-	hash, err := auth.Load(vaultDir)
-	if err != nil || hash == "" {
-		return true, http.StatusInternalServerError, "vault error"
+func checkPassword(password string, vaultDir string) (bool, int, string, auth.Meta) {
+	meta, err := auth.Load(vaultDir)
+	if err != nil || meta.MasterHash == "" {
+		return true, http.StatusInternalServerError, "vault error", auth.Meta{}
 	}
 
-	valid, err := crypto.VerifyPassword(password, hash)
+	valid, err := crypto.VerifyPassword(password, meta.MasterHash)
 	if err != nil || !valid {
-		return true, http.StatusUnauthorized, "invalid password"
+		return true, http.StatusUnauthorized, "invalid password", auth.Meta{}
 	}
 
-	return false, 0, ""
+	return false, 0, "", meta
 }

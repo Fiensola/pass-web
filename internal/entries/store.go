@@ -14,13 +14,13 @@ func entiresPath(vaultDir string) string {
 	return filepath.Join(vaultDir, entriesFilename)
 }
 
-func Save(vauldDir string, entries []Entry, masterPassword string) error {
+func Save(vauldDir string, entries []Entry, masterPassword string, salt string) error {
 	data, err := json.Marshal(entries)
 	if err != nil {
 		return err
 	}
 
-	encrypted, err := crypto.Encrypt(data, masterPassword)
+	encrypted, err := crypto.Encrypt(data, masterPassword, salt)
 	if err != nil {
 		return err
 	}
@@ -28,7 +28,7 @@ func Save(vauldDir string, entries []Entry, masterPassword string) error {
 	return os.WriteFile(entiresPath(vauldDir), []byte(encrypted), 0600)
 }
 
-func Load(vauldDir string, masterPassword string) ([]Entry, error) {
+func Load(vauldDir string, masterPassword string, salt string) ([]Entry, error) {
 	encryptedData, err := os.ReadFile(entiresPath(vauldDir))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -42,7 +42,7 @@ func Load(vauldDir string, masterPassword string) ([]Entry, error) {
 		return []Entry{}, nil
 	}
 
-	decrypted, err := crypto.Decrypt(string(encryptedData), masterPassword)
+	decrypted, err := crypto.Decrypt(string(encryptedData), masterPassword, salt)
 	if err != nil {
 		return nil, err
 	}
